@@ -33,12 +33,8 @@ final class SessionManager: ObservableObject {
                                  appBundleID: app.bundleID,
                                  startTime: Date())
         isPanelVisible = true
-
-        // ✅ Immediately try to find and watch the project directory
-        // using every available signal — don't wait for poll
         discoverAndWatch(for: app)
         startTitlePolling()
-
         DispatchQueue.main.async {
             (NSApp.delegate as? AppDelegate)?.showSessionPanel()
         }
@@ -125,77 +121,58 @@ final class SessionManager: ObservableObject {
         }
     }
 
+    // ✅ Watch directory silently — no timeline noise from "Watching: X"
     private func watchDir(_ dir: String) {
         let expanded = (dir as NSString).expandingTildeInPath
         guard !watchedDirs.contains(expanded),
               FileManager.default.fileExists(atPath: expanded) else { return }
         watchedDirs.insert(expanded)
         fsWatcher.watch(directories: [expanded])
-        addChange("Watching: \(URL(fileURLWithPath: expanded).lastPathComponent)",
-                  type: .save)
+        // No addChange("Watching: ...") — this cluttered the timeline
     }
 
     // MARK: - Project Directory Discovery
 
-    /// Called immediately when a session starts. Uses multiple signals:
-    ///  1. KiCad config file (most reliable for KiCad)
-    ///  2. Accessibility window title of the running app
-    ///  3. NSDocumentController recent documents
-    ///  4. Common ~/Documents subfolders
     private func discoverAndWatch(for app: CADApp) {
         var dirs: [String] = []
 
-        // 1. App-specific config-based discovery
         switch app.bundleID {
         case _ where app.bundleID.contains("kicad"):
             dirs += kicadRecentProjects()
         case _ where app.bundleID.contains("altium"):
             dirs += altiumRecentProjects()
-        default:
-            break
+        default: break
         }
 
-        // 2. Accessibility: read open window title right now
         if let runningApp = NSWorkspace.shared.runningApplications
             .first(where: { $0.bundleIdentifier == app.bundleID }) {
             let title = axWindowTitle(for: runningApp)
             if let dir = dirFromTitle(title) { dirs.append(dir) }
-            // Also grab all open document URLs from the app via recent docs
             dirs += recentDocDirs(for: runningApp)
         }
 
-        // 3. NSDocumentController recent documents filtered by extension
         for url in NSDocumentController.shared.recentDocumentURLs {
-            let ext = url.pathExtension.lowercased()
-            if isDesignExt(ext) {
+            if isDesignExt(url.pathExtension.lowercased()) {
                 dirs.append(url.deletingLastPathComponent().path)
             }
         }
 
-        // Deduplicate and watch
-        let unique = Array(Set(dirs)).filter {
-            FileManager.default.fileExists(atPath: $0)
-        }
-        for d in unique { watchDir(d) }
+        Array(Set(dirs))
+            .filter { FileManager.default.fileExists(atPath: $0) }
+            .forEach { watchDir($0) }
     }
 
     // MARK: - KiCad Recent Projects
 
-    /// KiCad stores recent projects in its config JSON at:
-    /// ~/Library/Preferences/kicad/<version>/kicad.json  (modern)
-    /// ~/Library/Application Support/kicad/kicad.json    (older)
     private func kicadRecentProjects() -> [String] {
         let fm   = FileManager.default
         var dirs = [String]()
+        let bases = ["~/Library/Preferences/kicad",
+                     "~/Library/Application Support/kicad"]
+            .map { ($0 as NSString).expandingTildeInPath }
 
-        let searchBases = [
-            "~/Library/Preferences/kicad",
-            "~/Library/Application Support/kicad"
-        ].map { ($0 as NSString).expandingTildeInPath }
-
-        for base in searchBases {
+        for base in bases {
             guard fm.fileExists(atPath: base) else { continue }
-            // Walk up to 2 levels (version subdirs like "8.0", "9.0")
             let contents = (try? fm.contentsOfDirectory(atPath: base)) ?? []
             let candidates = ["kicad.json"] + contents.map { "\($0)/kicad.json" }
             for rel in candidates {
@@ -203,16 +180,7 @@ final class SessionManager: ObservableObject {
                 guard let data = fm.contents(atPath: path),
                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
                 else { continue }
-                // Recent projects are under system.file_history or similar
-                if let sys = json["system"] as? [String: Any],
-                   let history = sys["file_history"] as? [String] {
-                    dirs += history.map {
-                        URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath)
-                            .deletingLastPathComponent().path
-                    }
-                }
-                // Also check "pcbnew" and "eeschema" sections
-                for key in ["pcbnew", "eeschema", "kicad"] {
+                for key in ["system", "pcbnew", "eeschema", "kicad"] {
                     if let section = json[key] as? [String: Any],
                        let history = section["file_history"] as? [String] {
                         dirs += history.map {
@@ -223,48 +191,38 @@ final class SessionManager: ObservableObject {
                 }
             }
         }
-
-        // Fallback: scan ~/Documents and ~/Desktop for .kicad_pro files
-        let scanDirs = ["~/Documents", "~/Desktop", "~/Projects", "~/kicad"]
+        let scanDirs = ["~/Documents","~/Desktop","~/Projects","~/kicad"]
             .map { ($0 as NSString).expandingTildeInPath }
         for base in scanDirs where fm.fileExists(atPath: base) {
-            if let enumerator = fm.enumerator(
-                at: URL(fileURLWithPath: base),
-                includingPropertiesForKeys: [.isRegularFileKey],
-                options: [.skipsHiddenFiles, .skipsPackageDescendants]
-            ) {
-                for case let url as URL in enumerator {
+            let enum_ = fm.enumerator(at: URL(fileURLWithPath: base),
+                                      includingPropertiesForKeys: [.isRegularFileKey],
+                                      options: [.skipsHiddenFiles, .skipsPackageDescendants])
+            if let e = enum_ {
+                for case let url as URL in e {
                     if url.pathExtension.lowercased() == "kicad_pro" {
                         dirs.append(url.deletingLastPathComponent().path)
                     }
-                    // Don't recurse more than 4 levels
-                    let depth = url.pathComponents.count - URL(fileURLWithPath: base).pathComponents.count
-                    if depth > 4 { enumerator.skipDescendants() }
+                    let depth = url.pathComponents.count
+                        - URL(fileURLWithPath: base).pathComponents.count
+                    if depth > 4 { e.skipDescendants() }
                 }
             }
         }
         return dirs
     }
 
-    // MARK: - Altium Recent Projects
-
     private func altiumRecentProjects() -> [String] {
-        // Altium stores MRU in ~/Library/Preferences/Altium/
         let base = ("~/Library/Preferences/Altium" as NSString).expandingTildeInPath
         var dirs = [String]()
-        guard let contents = try? FileManager.default.contentsOfDirectory(atPath: base) else {
-            return dirs
-        }
+        guard let contents = try? FileManager.default.contentsOfDirectory(atPath: base) else { return dirs }
         for file in contents where file.hasSuffix(".ini") || file.hasSuffix(".xml") {
-            let path = "\(base)/\(file)"
-            if let text = try? String(contentsOfFile: path, encoding: .utf8) {
-                // Lines like: MRU1=/Users/alice/projects/board.PrjPcb
-                let lines = text.components(separatedBy: "\n")
-                for line in lines {
+            if let text = try? String(contentsOfFile: "\(base)/\(file)", encoding: .utf8) {
+                for line in text.components(separatedBy: "\n") {
                     let parts = line.components(separatedBy: "=")
                     if parts.count == 2 {
                         let val = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
-                        if val.hasPrefix("/") && isDesignExt(URL(fileURLWithPath: val).pathExtension.lowercased()) {
+                        if val.hasPrefix("/"),
+                           isDesignExt(URL(fileURLWithPath: val).pathExtension.lowercased()) {
                             dirs.append(URL(fileURLWithPath: val).deletingLastPathComponent().path)
                         }
                     }
@@ -277,7 +235,6 @@ final class SessionManager: ObservableObject {
     // MARK: - Helpers
 
     private func recentDocDirs(for app: NSRunningApplication) -> [String] {
-        // Use Accessibility to get all window titles and extract paths
         let el = AXUIElementCreateApplication(app.processIdentifier)
         var windows: AnyObject?
         guard AXUIElementCopyAttributeValue(el, kAXWindowsAttribute as CFString,
@@ -289,9 +246,7 @@ final class SessionManager: ObservableObject {
             if AXUIElementCopyAttributeValue(win, kAXTitleAttribute as CFString,
                                              &titleObj) == .success,
                let title = titleObj as? String,
-               let dir = dirFromTitle(title) {
-                dirs.append(dir)
-            }
+               let dir = dirFromTitle(title) { dirs.append(dir) }
         }
         return dirs
     }
@@ -310,25 +265,16 @@ final class SessionManager: ObservableObject {
         return t
     }
 
-    /// Extract a directory path from a window title.
-    /// KiCad: "main.kicad_pcb [/Users/alice/board]"
-    /// Altium: "Altium Designer - board [/Users/alice/board/main.PcbDoc]"
     private func dirFromTitle(_ title: String) -> String? {
         let fm = FileManager.default
-
-        // Look for bracketed path: [/some/path]
         if let start = title.firstIndex(of: "["),
-           let end   = title.firstIndex(of: "]"),
-           start < end {
+           let end   = title.firstIndex(of: "]"), start < end {
             let inner = String(title[title.index(after: start)..<end])
             let url   = URL(fileURLWithPath: inner)
             let dir   = url.hasDirectoryPath ? url.path : url.deletingLastPathComponent().path
             if fm.fileExists(atPath: dir) { return dir }
         }
-
-        // Look for absolute path component (after — or |)
-        let delimiters = CharacterSet(charactersIn: "—|-")
-        for part in title.components(separatedBy: delimiters) {
+        for part in title.components(separatedBy: CharacterSet(charactersIn: "—|-")) {
             let cleaned = part.trimmingCharacters(in: .whitespaces)
             if cleaned.hasPrefix("/") {
                 let url = URL(fileURLWithPath: cleaned)
@@ -345,7 +291,7 @@ final class SessionManager: ObservableObject {
          "sldprt","sldasm","slddrw"].contains(ext)
     }
 
-    // MARK: - Title Polling (runs every 2 s)
+    // MARK: - Title Polling
 
     private func startTitlePolling() {
         titlePollTimer?.invalidate()
@@ -363,14 +309,9 @@ final class SessionManager: ObservableObject {
         guard let session = currentSession,
               let front   = NSWorkspace.shared.frontmostApplication,
               front.bundleIdentifier == session.appBundleID else { return }
-
         let title = axWindowTitle(for: front)
         guard !title.isEmpty else { return }
-
-        // Discover any new project directories from the title
         if let dir = dirFromTitle(title) { watchDir(dir) }
-
-        // Log document switch
         if title != lastWindowTitle && !lastWindowTitle.isEmpty {
             let newFile  = extractFileName(from: title)
             let prevFile = extractFileName(from: lastWindowTitle)
@@ -403,20 +344,20 @@ final class SessionManager: ObservableObject {
         globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return }
             if event.modifierFlags.contains(.command) && event.keyCode == 1 {
-                // ⌘S
                 guard self.currentSession != nil else { return }
                 DispatchQueue.main.async {
-                    let file = self.extractFileName(from: self.lastWindowTitle)
-                    let desc = file.isEmpty ? "⌘S save" : "⌘S save: \(file)"
-                    // Dedupe: skip if FSEvents already caught this in last 2 s
-                    let cutoff = Date().addingTimeInterval(-2)
-                    if self.currentSession?.changes.filter({ $0.changeType == .save && $0.timestamp > cutoff }).isEmpty == true {
+                    let file   = self.extractFileName(from: self.lastWindowTitle)
+                    let desc   = file.isEmpty ? "⌘S save" : "⌘S save: \(file)"
+                    let cutoff = Date().addingTimeInterval(-3)
+                    let recent = self.currentSession?.changes
+                        .filter { $0.changeType == .save && $0.timestamp > cutoff }
+                    // Dedupe — FSEvents likely caught this already
+                    if recent?.isEmpty == true {
                         self.addChange(desc, file: file.isEmpty ? nil : file, type: .save)
                     }
                 }
             }
             if event.modifierFlags.contains([.command, .shift]) && event.keyCode == 45 {
-                // ⌘⇧N — open panel
                 DispatchQueue.main.async {
                     self.isPanelVisible = true
                     (NSApp.delegate as? AppDelegate)?.showSessionPanel()

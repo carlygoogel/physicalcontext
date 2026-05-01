@@ -117,9 +117,9 @@ struct Deviation: Identifiable, Codable {
 
     var severityColor: Color {
         switch severity {
-        case .minor: return Color(hex: "#3B82F6")
-        case .moderate: return Theme.warning
-        case .major: return Theme.danger
+        case .minor:    return Color(hex: "#3B82F6")
+        case .moderate: return Color(hex: "#F59E0B")
+        case .major:    return Color(hex: "#F87171")
         }
     }
 }

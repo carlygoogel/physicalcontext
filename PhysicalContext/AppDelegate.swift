@@ -20,6 +20,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var summaryControllers: [SummaryWindowBox] = []
 
+    // ✅ Must match SessionPanelView.panelHeight exactly to prevent clipping
+    private let panelHeight:     CGFloat = 640
+    private let panelCollapsedW: CGFloat = 52
+    private let panelExpandedW:  CGFloat = 320
+
     // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -97,12 +102,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     @objc private func endSessionMenu() { SessionManager.shared.endSession() }
 
-    private let panelHeight:       CGFloat = 520
-    private let panelCollapsedW:   CGFloat = 52
-    private let panelExpandedW:    CGFloat = 300
-
     private func buildSessionPanel() {
-        // Start collapsed
         let w = panelCollapsedW
         let h = panelHeight
 
@@ -121,18 +121,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         win.collectionBehavior          = [.canJoinAllSpaces, .fullScreenAuxiliary]
         win.isReleasedWhenClosed        = false
 
-        // Anchor to right edge of screen
         if let screen = NSScreen.main {
             let sv = screen.visibleFrame
             win.setFrameOrigin(NSPoint(x: sv.maxX - w - 8,
                                        y: sv.midY - h / 2))
         }
 
-        // ✅ VFX as contentView — NSHostingView as subview
         let bounds = NSRect(x: 0, y: 0, width: w, height: h)
         let vfx = NSVisualEffectView(frame: bounds)
         vfx.autoresizingMask = [.width, .height]
-        vfx.material         = .hudWindow        // darker than underWindowBackground
+        vfx.material         = .hudWindow
         vfx.blendingMode     = .behindWindow
         vfx.state            = .active
         vfx.appearance       = NSAppearance(named: .darkAqua)
@@ -140,15 +138,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         vfx.layer?.cornerRadius  = 16
         vfx.layer?.masksToBounds = true
 
-        // Pass resize callback so SwiftUI can drive window width
         let hosting = NSHostingView(rootView: SessionPanelView { [weak self, weak win] newWidth in
             guard let self, let win else { return }
-            var frame = win.frame
+            var frame    = win.frame
             let oldRight = frame.maxX
             frame.size.width = newWidth
             frame.origin.x   = oldRight - newWidth
             win.setFrame(frame, display: true, animate: true)
-            // Re-anchor the VFX after resize
             self.panelVFX?.frame = NSRect(x: 0, y: 0, width: newWidth, height: self.panelHeight)
         })
         hosting.frame            = bounds

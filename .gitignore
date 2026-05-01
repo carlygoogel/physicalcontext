@@ -1,0 +1,19 @@
+# Xcode
+*.xcuserstate
+xcuserdata/
+DerivedData/
+*.xcscmblueprint
+*.xccheckout
+build/
+
+# SPM
+.build/
+.swiftpm/
+*.resolved
+
+# macOS
+.DS_Store
+*.swp
+
+# Secrets — never commit your API key
+*.plist.bak
