@@ -14,6 +14,8 @@ struct Session: Identifiable, Codable {
     var deviations: [Deviation] = []
     var summary: String = ""
     var additionalNotes: String = ""
+    var aiSummary: SessionAISummary? = nil
+    var suggestedDeviations: [SuggestedDeviation] = []
 
     var duration: TimeInterval {
         (endTime ?? Date()).timeIntervalSince(startTime)

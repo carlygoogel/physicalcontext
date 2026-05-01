@@ -25,6 +25,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let panelCollapsedW: CGFloat = 52
     private let panelExpandedW:  CGFloat = 320
 
+
     // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -106,7 +107,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let w = panelCollapsedW
         let h = panelHeight
 
-        let win = NSPanel(
+        let win = KeyablePanel(
             contentRect: NSRect(x: 0, y: 0, width: w, height: h),
             styleMask:   [.borderless, .fullSizeContentView,
                           .nonactivatingPanel, .utilityWindow],
@@ -230,6 +231,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         vfx.wantsLayer       = true
         return (win, vfx)
     }
+}
+
+// ✅ NSPanel returns canBecomeKey = false for .utilityWindow panels by default.
+// WindowKeyMaker calls makeKey() but the panel silently rejects it, so
+// keystrokes never reach the TextEditor. This subclass overrides that.
+final class KeyablePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
 }
 
 private struct SummaryWindowBox {

@@ -3,11 +3,18 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 56;
+	objectVersion = 70;
 	objects = {
 
 /* Begin PBXBuildFile section */
 		0E0365B94284476F85DB9A13 /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 0004321424554E9ABE426638 /* Info.plist */; };
+		171172072FB2863900A8ED6B /* run_spice.py in Resources */ = {isa = PBXBuildFile; fileRef = 171172052FB2863900A8ED6B /* run_spice.py */; };
+		1711720B2FB2865F00A8ED6B /* SpiceAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 171172082FB2865F00A8ED6B /* SpiceAnalyzer.swift */; };
+		1711720C2FB2865F00A8ED6B /* SpiceBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 171172092FB2865F00A8ED6B /* SpiceBridge.swift */; };
+		1711720E2FB286B900A8ED6B /* SummaryEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1711720D2FB286B900A8ED6B /* SummaryEngine.swift */; };
+		171172102FB286D300A8ED6B /* SpiceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1711720F2FB286D300A8ED6B /* SpiceModels.swift */; };
+		171172142FB288BC00A8ED6B /* KiCadSExprParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 171172132FB288BC00A8ED6B /* KiCadSExprParser.swift */; };
+		175F40AE2FA98A4A008A5527 /* SuggestedDeviationCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 175F40AD2FA98A4A008A5527 /* SuggestedDeviationCard.swift */; };
 		17F986592FA4FF56009A6454 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 17F986582FA4FF56009A6454 /* Assets.xcassets */; };
 		17F9865B2FA4FF71009A6454 /* AppMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17F9865A2FA4FF71009A6454 /* AppMonitor.swift */; };
 		17F9865D2FA4FF94009A6454 /* SessionPromptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17F9865C2FA4FF94009A6454 /* SessionPromptView.swift */; };
@@ -22,12 +29,18 @@
 		A640E61240484A0E8A54AF0D /* MenuBarPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61D33CE3C3224C9BB10E64BC /* MenuBarPopoverView.swift */; };
 		B3E3F2579FA045119F9ADAB3 /* SessionPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2091F823F3E642138273C7C3 /* SessionPanelView.swift */; };
 		BE8ED97BD68D41F4B57B9A92 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CE9869D6DCE4725BB721E4A /* SettingsView.swift */; };
-		E761B782D6F748DCA5F025E3 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDE9DADA04D64147ADA9EEF8 /* Theme.swift */; };
 		F2A6A99008FC401C86F200B6 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = B42DF1D7658A4EADB18F7DFA /* Models.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		0004321424554E9ABE426638 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		171172052FB2863900A8ED6B /* run_spice.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = run_spice.py; sourceTree = "<group>"; };
+		171172082FB2865F00A8ED6B /* SpiceAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpiceAnalyzer.swift; sourceTree = "<group>"; };
+		171172092FB2865F00A8ED6B /* SpiceBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpiceBridge.swift; sourceTree = "<group>"; };
+		1711720D2FB286B900A8ED6B /* SummaryEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryEngine.swift; sourceTree = "<group>"; };
+		1711720F2FB286D300A8ED6B /* SpiceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpiceModels.swift; sourceTree = "<group>"; };
+		171172132FB288BC00A8ED6B /* KiCadSExprParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KiCadSExprParser.swift; sourceTree = "<group>"; };
+		175F40AD2FA98A4A008A5527 /* SuggestedDeviationCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestedDeviationCard.swift; sourceTree = "<group>"; };
 		17F986582FA4FF56009A6454 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		17F9865A2FA4FF71009A6454 /* AppMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppMonitor.swift; sourceTree = "<group>"; };
 		17F9865C2FA4FF94009A6454 /* SessionPromptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionPromptView.swift; sourceTree = "<group>"; };
@@ -44,8 +57,12 @@
 		B42DF1D7658A4EADB18F7DFA /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		CB60BF4AA8BF40F6A1815A80 /* SessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManager.swift; sourceTree = "<group>"; };
 		FC40032EEFBA484C81398FB5 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
-		FDE9DADA04D64147ADA9EEF8 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		175F40AA2FA988AB008A5527 /* Service */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Service; sourceTree = "<group>"; };
+		175F40AF2FA98A70008A5527 /* Style */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Style; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		AA000000000000000000011 /* Frameworks */ = {
@@ -61,16 +78,27 @@
 		0FDA13D0F6264831A476DD37 /* Managers */ = {
 			isa = PBXGroup;
 			children = (
-				17F9865A2FA4FF71009A6454 /* AppMonitor.swift */,
 				A9AD53766053474B8CCEE3C5 /* StorageManager.swift */,
 				CB60BF4AA8BF40F6A1815A80 /* SessionManager.swift */,
 			);
 			path = Managers;
 			sourceTree = "<group>";
 		};
+		1711720A2FB2865F00A8ED6B /* AI */ = {
+			isa = PBXGroup;
+			children = (
+				1711720D2FB286B900A8ED6B /* SummaryEngine.swift */,
+				171172082FB2865F00A8ED6B /* SpiceAnalyzer.swift */,
+				171172092FB2865F00A8ED6B /* SpiceBridge.swift */,
+			);
+			path = AI;
+			sourceTree = "<group>";
+		};
 		17F986612FA5292E009A6454 /* Detection */ = {
 			isa = PBXGroup;
 			children = (
+				171172132FB288BC00A8ED6B /* KiCadSExprParser.swift */,
+				17F9865A2FA4FF71009A6454 /* AppMonitor.swift */,
 				17F986602FA5292E009A6454 /* FSEventWatcher.swift */,
 			);
 			path = Detection;
@@ -79,6 +107,7 @@
 		60C04CC4F90E4FB892D939D1 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				171172052FB2863900A8ED6B /* run_spice.py */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -102,16 +131,18 @@
 		AA000000000000000000013 /* PhysicalContext */ = {
 			isa = PBXGroup;
 			children = (
+				175F40AF2FA98A70008A5527 /* Style */,
+				175F40AA2FA988AB008A5527 /* Service */,
 				17F986612FA5292E009A6454 /* Detection */,
 				17F9865E2FA50663009A6454 /* main.swift */,
 				17F986582FA4FF56009A6454 /* Assets.xcassets */,
 				FC40032EEFBA484C81398FB5 /* AppDelegate.swift */,
-				FDE9DADA04D64147ADA9EEF8 /* Theme.swift */,
 				ACFA7625206049B9AEC9F68A /* Models */,
 				0FDA13D0F6264831A476DD37 /* Managers */,
 				EAEDB262BF214F46A70763C6 /* Views */,
 				60C04CC4F90E4FB892D939D1 /* Resources */,
 				0004321424554E9ABE426638 /* Info.plist */,
+				1711720A2FB2865F00A8ED6B /* AI */,
 			);
 			path = PhysicalContext;
 			sourceTree = "<group>";
@@ -119,6 +150,7 @@
 		ACFA7625206049B9AEC9F68A /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				1711720F2FB286D300A8ED6B /* SpiceModels.swift */,
 				B42DF1D7658A4EADB18F7DFA /* Models.swift */,
 			);
 			path = Models;
@@ -134,6 +166,7 @@
 				3B7F0EB6A8A748D2B30974CA /* SessionSummaryView.swift */,
 				8027B36E785D4DDCBD248DE4 /* AllSessionsView.swift */,
 				2CE9869D6DCE4725BB721E4A /* SettingsView.swift */,
+				175F40AD2FA98A4A008A5527 /* SuggestedDeviationCard.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -152,6 +185,10 @@
 			buildRules = (
 			);
 			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				175F40AA2FA988AB008A5527 /* Service */,
+				175F40AF2FA98A70008A5527 /* Style */,
 			);
 			name = PhysicalContext;
 			productName = PhysicalContext;
@@ -198,6 +235,7 @@
 			files = (
 				17F986592FA4FF56009A6454 /* Assets.xcassets in Resources */,
 				0E0365B94284476F85DB9A13 /* Info.plist in Resources */,
+				171172072FB2863900A8ED6B /* run_spice.py in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -208,10 +246,13 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1711720B2FB2865F00A8ED6B /* SpiceAnalyzer.swift in Sources */,
+				1711720C2FB2865F00A8ED6B /* SpiceBridge.swift in Sources */,
 				17F986642FA52956009A6454 /* StartSessionWindow.swift in Sources */,
+				171172102FB286D300A8ED6B /* SpiceModels.swift in Sources */,
 				63F8F2DE83984A1E97D6254E /* AppDelegate.swift in Sources */,
+				171172142FB288BC00A8ED6B /* KiCadSExprParser.swift in Sources */,
 				17F9865F2FA50663009A6454 /* main.swift in Sources */,
-				E761B782D6F748DCA5F025E3 /* Theme.swift in Sources */,
 				F2A6A99008FC401C86F200B6 /* Models.swift in Sources */,
 				8BC9815138BA4EC189D2F580 /* StorageManager.swift in Sources */,
 				813C58233D544398A6FD2059 /* SessionManager.swift in Sources */,
@@ -221,7 +262,9 @@
 				17F9865B2FA4FF71009A6454 /* AppMonitor.swift in Sources */,
 				17F9865D2FA4FF94009A6454 /* SessionPromptView.swift in Sources */,
 				200D7B3679AF4C82959DD985 /* SessionSummaryView.swift in Sources */,
+				175F40AE2FA98A4A008A5527 /* SuggestedDeviationCard.swift in Sources */,
 				776161340C5D49FABCB75106 /* AllSessionsView.swift in Sources */,
+				1711720E2FB286B900A8ED6B /* SummaryEngine.swift in Sources */,
 				BE8ED97BD68D41F4B57B9A92 /* SettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

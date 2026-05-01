@@ -1,27 +1,7 @@
 import SwiftUI
 import AppKit
 
-// MARK: - WindowKeyMaker
-// Makes the floating NSPanel accept key events when the user taps into a
-// text field. Without this, .nonactivatingPanel silently discards keystrokes.
-private struct WindowKeyMaker: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let v = NSView()
-        DispatchQueue.main.async {
-            NSApp.setActivationPolicy(.regular)
-            NSApp.activate(ignoringOtherApps: true)
-            v.window?.makeKey()
-        }
-        return v
-    }
-    func updateNSView(_ v: NSView, context: Context) {
-        DispatchQueue.main.async {
-            NSApp.setActivationPolicy(.regular)
-            NSApp.activate(ignoringOtherApps: true)
-            v.window?.makeKey()
-        }
-    }
-}
+
 
 // MARK: - Input Mode
 
@@ -369,7 +349,6 @@ struct SessionPanelView: View {
                     .padding(.horizontal, 6).padding(.vertical, 4)
                     .frame(minHeight: 72, maxHeight: 120)
                     // ✅ Makes the nonactivatingPanel accept keystrokes
-                    .background(WindowKeyMaker())
             }
 
             HStack {
@@ -508,8 +487,7 @@ struct SessionPanelView: View {
                 .background(Color.clear)
                 .padding(.horizontal, 6).padding(.vertical, 4)
                 .frame(minHeight: minH, maxHeight: minH + 40)
-                // ✅ WindowKeyMaker on every text area
-                .background(WindowKeyMaker())
+               
         }
     }
 

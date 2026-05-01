@@ -40,6 +40,9 @@ final class SessionManager: ObservableObject {
         }
     }
 
+    // Path of last watched .kicad_sch/.asc so the summary window can simulate on open
+    private(set) var lastSimulatablePath: String?
+
     @discardableResult
     func endSession() -> Session? {
         guard var session = currentSession else { return nil }
@@ -128,7 +131,15 @@ final class SessionManager: ObservableObject {
               FileManager.default.fileExists(atPath: expanded) else { return }
         watchedDirs.insert(expanded)
         fsWatcher.watch(directories: [expanded])
-        // No addChange("Watching: ...") — this cluttered the timeline
+
+        // Track any .kicad_sch in this dir as a candidate for end-of-session simulation
+        let fm = FileManager.default
+        if let files = try? fm.contentsOfDirectory(atPath: expanded) {
+            for file in files where file.hasSuffix(".kicad_sch") || file.hasSuffix(".asc") {
+                lastSimulatablePath = "\(expanded)/\(file)"
+                break
+            }
+        }
     }
 
     // MARK: - Project Directory Discovery

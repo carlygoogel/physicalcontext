@@ -7,6 +7,8 @@ struct SettingsView: View {
     @AppStorage("trackSaves")       private var trackSaves      = true
     @AppStorage("devThreshold")     private var devThreshold    = "moderate"
     @AppStorage("specFilePath")     private var specFilePath    = ""
+    @AppStorage("anthropicAPIKey") private var anthropicKey = ""
+
 
     var body: some View {
         ZStack {
@@ -53,6 +55,25 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("Data").font(Theme.mono(10, .semibold)).foregroundColor(Theme.textTertiary)
+                }
+                
+                Section {
+                    HStack {
+                        Text("Anthropic API Key")
+                            .font(Theme.sans(12)).foregroundColor(Theme.textPrimary)
+                        Spacer()
+                        SecureField("sk-ant-…", text: $anthropicKey)
+                            .font(Theme.mono(11))
+                            .foregroundColor(Theme.textSecondary)
+                            .textFieldStyle(.plain)
+                            .frame(width: 200)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    Text("Used for session summarization. Never sent anywhere except api.anthropic.com.")
+                        .font(Theme.sans(10))
+                        .foregroundColor(Theme.textTertiary)
+                } header: {
+                    Text("AI").font(Theme.mono(10, .semibold)).foregroundColor(Theme.textTertiary)
                 }
             }
             .formStyle(.grouped)

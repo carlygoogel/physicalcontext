@@ -237,33 +237,64 @@ final class FSEventWatcher {
 
     // MARK: - KiCad Schematic parser (.kicad_sch)
 
+    // Stores full KiCad schematics for rich diffing (component values + positions)
+    private var schematicSnapshots: [String: KiCadSchematic] = [:]
+
     private func analyzeKiCadSch(path: String, fileName: String, ts: Date) {
         guard let content = try? String(contentsOfFile: path, encoding: .utf8) else {
             emit(path: path, fileName: fileName,
                  description: "Saved schematic: \(fileName)", type: .save, ts: ts); return
         }
-        let current = KiCadSchSnapshot(content: content)
-        let prev    = snapshots[path]?.kicadSch
-        var parts   = [String]()
 
-        if let prev {
-            let added   = current.symbols.subtracting(prev.symbols)
-            let removed = prev.symbols.subtracting(current.symbols)
-            if !added.isEmpty   { parts.append("Added: \(added.prefix(3).joined(separator: ", "))") }
-            if !removed.isEmpty { parts.append("Removed: \(removed.prefix(3).joined(separator: ", "))") }
+        let current = KiCadSExprParser.parse(content: content, fileName: fileName)
 
-            let wd = current.wireCount - prev.wireCount
-            if abs(wd) > 1 { parts.append(wd > 0 ? "+\(wd) wire segments" : "\(wd) wire segments") }
+        if let prev = schematicSnapshots[path] {
+            let diff = KiCadSExprParser.diff(old: prev, new: current)
 
-            let newLabels = current.labels.subtracting(prev.labels)
-            if !newLabels.isEmpty {
-                parts.append("New labels: \(newLabels.prefix(3).joined(separator: ", "))")
+            if diff.isEmpty {
+                emit(path: path, fileName: fileName,
+                     description: "Saved \(fileName) (no structural changes)",
+                     type: .save, ts: ts)
+            } else {
+                // Component adds/removes
+                if !diff.addedComponents.isEmpty || !diff.removedComponents.isEmpty {
+                    let type: FileChangeEvent.ChangeKind =
+                        diff.addedComponents.isEmpty ? .componentRemoved : .componentAdded
+                    emit(path: path, fileName: fileName,
+                         description: diff.summary, type: type, ts: ts)
+                }
+                // Coordinate moves — separate timeline entry
+                if !diff.movedComponents.isEmpty {
+                    let names = diff.movedComponents.prefix(4)
+                        .map { "\($0.ref) (\($0.value))" }.joined(separator: ", ")
+                    let extra = diff.movedComponents.count > 4
+                        ? " +\(diff.movedComponents.count - 4) more" : ""
+                    emit(path: path, fileName: fileName,
+                         description: "Moved: \(names)\(extra)",
+                         type: .schematicChanged, ts: ts)
+                }
+                // Value changes only
+                if !diff.changedValues.isEmpty && diff.addedComponents.isEmpty
+                    && diff.removedComponents.isEmpty && diff.movedComponents.isEmpty {
+                    emit(path: path, fileName: fileName,
+                         description: diff.summary, type: .schematicChanged, ts: ts)
+                }
+                // Net changes
+                if !diff.netChanges.added.isEmpty || !diff.netChanges.removed.isEmpty {
+                    let nets = (diff.netChanges.added + diff.netChanges.removed)
+                        .prefix(3).joined(separator: ", ")
+                    emit(path: path, fileName: fileName,
+                         description: "Net changes: \(nets)", type: .netChanged, ts: ts)
+                }
             }
+        } else {
+            emit(path: path, fileName: fileName,
+                 description: "Saved schematic: \(fileName) (\(current.summary))",
+                 type: .schematicChanged, ts: ts)
         }
 
-        let desc = parts.isEmpty ? "Saved schematic: \(fileName) (layout change)" : parts.joined(separator: " · ")
-        emit(path: path, fileName: fileName, description: desc, type: .schematicChanged, ts: ts)
-        var snap = FileSnapshot(path: path); snap.kicadSch = current; snapshots[path] = snap
+        schematicSnapshots[path] = current
+        snapshots[path] = FileSnapshot(path: path)
     }
 
     // MARK: - Git diff (binary/code only)

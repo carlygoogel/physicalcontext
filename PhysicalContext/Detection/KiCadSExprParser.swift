@@ -1,0 +1,574 @@
+// Detection/KiCadSExprParser.swift — Physical Context
+//
+// Parses KiCad .kicad_sch S-expression files to extract:
+//   - Components with Reference AND Value (R1=10k, C1=100nF)
+//   - Net connectivity from wire segments and labels
+//   - Power symbols (VCC, GND, 3V3)
+//   - Generates a valid SPICE netlist per Altium/LTSpice spec
+//
+// KiCad S-expression format reference:
+//   https://dev-docs.kicad.org/en/file-formats/sexpr-schematic/
+//   KiCad's own sexpr_parser utility (qa_common_tools) validates this format.
+//
+// SPICE netlist format reference (from Altium documentation):
+//   RRefDes  N+  N-  Value         ; Resistor
+//   CRefDes  N+  N-  Value         ; Capacitor
+//   LRefDes  N+  N-  Value         ; Inductor
+//   VRefDes  N+  N-  DC Value      ; DC voltage source
+//   .TRAN    step  stop            ; Transient analysis
+//   .AC      dec   pts  f1  f2     ; AC analysis
+//   .END
+
+import Foundation
+
+// MARK: - Data models
+
+struct KiCadComponent {
+    let ref:      String   // e.g. "R1", "C5", "U3"
+    let value:    String   // e.g. "10k", "100nF", "STM32F4"
+    let libId:    String   // e.g. "Device:R", "MCU_ST_STM32F4:STM32F405RGTx"
+    let x:        Double
+    let y:        Double
+    let inBOM:    Bool
+
+    // Derived SPICE type from reference prefix
+    var spiceType: SpiceType {
+        let prefix = ref.prefix(1).uppercased()
+        switch prefix {
+        case "R": return .resistor
+        case "C": return .capacitor
+        case "L": return .inductor
+        case "V": return .voltageSource
+        case "I": return .currentSource
+        case "Q": return .bjt
+        case "M": return .mosfet
+        case "D": return .diode
+        case "U", "X": return .subcircuit
+        default:        return .unknown
+        }
+    }
+
+    enum SpiceType {
+        case resistor, capacitor, inductor
+        case voltageSource, currentSource
+        case bjt, mosfet, diode
+        case subcircuit, unknown
+    }
+}
+
+struct KiCadNet {
+    let name: String
+    var pinRefs: [PinRef]   // which component pins are on this net
+
+    struct PinRef {
+        let componentRef: String
+        let pinNumber:    String
+    }
+}
+
+struct KiCadSchematic {
+    let fileName:   String
+    let components: [KiCadComponent]
+    let nets:       [KiCadNet]
+    let powerNets:  Set<String>   // VCC, GND, 3V3, 5V, etc.
+
+    // Human-readable summary of what's in this schematic
+    var summary: String {
+        let rCount = components.filter { $0.spiceType == .resistor   }.count
+        let cCount = components.filter { $0.spiceType == .capacitor  }.count
+        let lCount = components.filter { $0.spiceType == .inductor   }.count
+        let vCount = components.filter { $0.spiceType == .voltageSource }.count
+        let icCount = components.filter {
+            $0.spiceType == .subcircuit || $0.spiceType == .bjt || $0.spiceType == .mosfet
+        }.count
+
+        var parts = [String]()
+        if rCount > 0  { parts.append("\(rCount)R") }
+        if cCount > 0  { parts.append("\(cCount)C") }
+        if lCount > 0  { parts.append("\(lCount)L") }
+        if vCount > 0  { parts.append("\(vCount)V") }
+        if icCount > 0 { parts.append("\(icCount) IC/transistor") }
+        return parts.joined(separator: ", ")
+    }
+}
+
+// MARK: - Parser
+
+final class KiCadSExprParser {
+
+    // MARK: - Public API
+
+    /// Parse a .kicad_sch file and return a structured schematic model.
+    static func parse(filePath: String) -> KiCadSchematic? {
+        guard let content = try? String(contentsOfFile: filePath, encoding: .utf8) else {
+            return nil
+        }
+        let fileName = URL(fileURLWithPath: filePath).lastPathComponent
+        return parse(content: content, fileName: fileName)
+    }
+
+    static func parse(content: String, fileName: String) -> KiCadSchematic {
+        let tokens    = tokenize(content)
+        let components = extractComponents(from: tokens, content: content)
+        let (nets, powerNets) = extractNets(from: tokens, content: content)
+        return KiCadSchematic(fileName: fileName,
+                              components: components,
+                              nets: nets,
+                              powerNets: powerNets)
+    }
+
+    // MARK: - SPICE Netlist Generation
+    //
+    // Follows the SPICE netlist format documented in Altium Designer docs:
+    //   https://www.altium.com/documentation/altium-designer/circuit-simulation/working-with-spice-netlist
+    //
+    // Format per component type:
+    //   R: Rref  Nplus  Nminus  Value
+    //   C: Cref  Nplus  Nminus  Value
+    //   L: Lref  Nplus  Nminus  Value
+    //   V: Vref  Nplus  Nminus  DC Value   (or PULSE/SIN)
+    //   Q: Qref  Nc  Nb  Ne  Model
+    //   M: Mref  Nd  Ng  Ns  Nb  Model
+    //   X: Xref  N1..Nn  SubcktName
+
+    static func generateSpiceNetlist(from schematic: KiCadSchematic) -> String {
+        var lines = [String]()
+
+        lines.append("* SPICE Netlist generated by Physical Context")
+        lines.append("* Source: \(schematic.fileName)")
+        lines.append("* Components: \(schematic.summary)")
+        lines.append("*")
+        lines.append("* Format: SPICE (Altium/LTSpice compatible)")
+        lines.append("* Reference: https://www.altium.com/documentation/circuit-simulation/working-with-spice-netlist")
+        lines.append("")
+        lines.append("* ── Schematic Netlist ──────────────────────────────────────────────")
+
+        // Build a net-to-connections map
+        var pinNets: [String: String] = [:]  // "R1_1" → "netname"
+        for net in schematic.nets {
+            for pin in net.pinRefs {
+                let key = "\(pin.componentRef)_\(pin.pinNumber)"
+                pinNets[key] = net.name
+            }
+        }
+
+        // Emit component lines
+        for comp in schematic.components.sorted(by: { $0.ref < $1.ref }) {
+            guard comp.inBOM else { continue }  // Skip power symbols
+            let line = spiceLine(for: comp, pinNets: pinNets)
+            if !line.isEmpty { lines.append(line) }
+        }
+
+        lines.append("")
+        lines.append("* ── Simulation Analysis ──────────────────────────────────────────────")
+
+        // Choose simulation type based on circuit contents
+        let hasAC  = schematic.components.contains { $0.value.uppercased().contains("AC") }
+        let hasCap = schematic.components.contains { $0.spiceType == .capacitor }
+        let hasInd = schematic.components.contains { $0.spiceType == .inductor  }
+
+        if hasAC || hasCap || hasInd {
+            // For circuits with reactive components: transient + AC
+            lines.append(".TRAN 1n 1u       ; Transient: 1ns step, 1us duration")
+            lines.append(".AC dec 100 1k 1Meg ; AC sweep: 100pts/dec, 1kHz–1MHz")
+        } else {
+            // Simple resistive network: DC operating point
+            lines.append(".DC V1 0 5 0.1    ; DC sweep if V1 exists, else remove")
+            lines.append(".OP               ; DC operating point")
+        }
+
+        lines.append("")
+        lines.append("* ── Measurements (Physical Context DRC) ──────────────────────────")
+        lines.append(generateMeasurements(for: schematic))
+
+        lines.append("")
+        lines.append(".END")
+
+        return lines.joined(separator: "\n")
+    }
+
+    // MARK: - SPICE line per component
+
+    private static func spiceLine(for comp: KiCadComponent,
+                                   pinNets: [String: String]) -> String {
+        // Helper: get net for pin N of this component, default to "N_\(ref)_\(pin)"
+        func net(_ pin: String) -> String {
+            pinNets["\(comp.ref)_\(pin)"] ?? "N_\(comp.ref)_\(pin)"
+        }
+
+        let v = comp.value
+
+        switch comp.spiceType {
+        case .resistor:
+            // R: Rref N+ N- Value
+            return "\(comp.ref) \(net("1")) \(net("2")) \(v)"
+
+        case .capacitor:
+            // C: Cref N+ N- Value
+            return "\(comp.ref) \(net("1")) \(net("2")) \(v)"
+
+        case .inductor:
+            // L: Lref N+ N- Value
+            return "\(comp.ref) \(net("1")) \(net("2")) \(v)"
+
+        case .voltageSource:
+            // V: Vref N+ N- Value (or AC/DC/PULSE params)
+            let vval = v.isEmpty ? "0" : v
+            if vval.uppercased().contains("AC") || vval.uppercased().contains("DC") {
+                return "\(comp.ref) \(net("1")) \(net("2")) \(vval)"
+            } else {
+                return "\(comp.ref) \(net("1")) \(net("2")) DC \(vval)"
+            }
+
+        case .currentSource:
+            return "\(comp.ref) \(net("1")) \(net("2")) DC \(v)"
+
+        case .diode:
+            // D: Dref Anode Cathode Model
+            let model = deriveDiodeModel(value: v)
+            return "\(comp.ref) \(net("A")) \(net("K")) \(model)"
+
+        case .bjt:
+            // Q: Qref Collector Base Emitter Model
+            let model = v.isEmpty ? "NPN_generic" : sanitizeModelName(v)
+            return "\(comp.ref) \(net("C")) \(net("B")) \(net("E")) \(model)"
+
+        case .mosfet:
+            // M: Mref Drain Gate Source Body Model
+            let model = v.isEmpty ? "NMOS_generic" : sanitizeModelName(v)
+            return "\(comp.ref) \(net("D")) \(net("G")) \(net("S")) \(net("B")) \(model)"
+
+        case .subcircuit:
+            // X: Xref nodes... SubcktName  (LTSpice convention)
+            let model = sanitizeModelName(v.isEmpty ? comp.libId : v)
+            let nodes = (1...4).map { net("\($0)") }.joined(separator: " ")
+            return "X\(comp.ref) \(nodes) \(model)"
+
+        case .unknown:
+            return "* UNKNOWN: \(comp.ref) \(v)"
+        }
+    }
+
+    // MARK: - Measurement generation
+
+    private static func generateMeasurements(for schematic: KiCadSchematic) -> String {
+        var lines = [String]()
+
+        // Find output nets (typically named "out", "vout", "output")
+        let outputNets = schematic.nets.filter {
+            let n = $0.name.lowercased()
+            return n.contains("out") || n.contains("vout")
+        }
+
+        for net in outputNets.prefix(3) {
+            let safe = net.name.replacingOccurrences(of: "/", with: "_")
+            lines.append(".MEAS TRAN \(safe)_max MAX V(\(net.name))")
+            lines.append(".MEAS TRAN \(safe)_min MIN V(\(net.name))")
+            lines.append(".MEAS TRAN \(safe)_avg AVG V(\(net.name))")
+        }
+
+        // Measure supply rails
+        for pwr in schematic.powerNets.sorted() where pwr != "0" && pwr != "GND" {
+            let safe = pwr.replacingOccurrences(of: "+", with: "P")
+                         .replacingOccurrences(of: "-", with: "N")
+            lines.append(".MEAS TRAN \(safe)_max MAX V(\(pwr))")
+        }
+
+        // Measure all voltage sources
+        for comp in schematic.components where comp.spiceType == .voltageSource {
+            lines.append(".MEAS TRAN I_\(comp.ref)_avg AVG I(\(comp.ref))")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    // MARK: - S-expression tokenizer
+    // Based on KiCad's sexpr_parser format (qa_common_tools -l sexpr_parser)
+
+    private static func tokenize(_ content: String) -> [String] {
+        var tokens = [String]()
+        var i = content.startIndex
+        while i < content.endIndex {
+            let c = content[i]
+            if c == "(" || c == ")" {
+                tokens.append(String(c))
+                i = content.index(after: i)
+            } else if c == "\"" {
+                // Quoted string
+                var j = content.index(after: i)
+                while j < content.endIndex && content[j] != "\"" {
+                    if content[j] == "\\" { j = content.index(after: j) }
+                    if j < content.endIndex { j = content.index(after: j) }
+                }
+                if j < content.endIndex {
+                    let str = String(content[content.index(after: i)..<j])
+                    tokens.append(str)
+                    i = content.index(after: j)
+                } else {
+                    i = j
+                }
+            } else if c.isWhitespace || c == "\n" || c == "\r" {
+                i = content.index(after: i)
+            } else {
+                // Atom
+                var j = i
+                while j < content.endIndex {
+                    let ch = content[j]
+                    if ch == "(" || ch == ")" || ch.isWhitespace || ch == "\n" { break }
+                    j = content.index(after: j)
+                }
+                tokens.append(String(content[i..<j]))
+                i = j
+            }
+        }
+        return tokens
+    }
+
+    // MARK: - Component extraction
+    // Reads (symbol ...) blocks from .kicad_sch S-expression
+    // Each symbol has (lib_id "LibName:Part"), (at X Y), (property "Reference" "R1"), (property "Value" "10k")
+
+    private static func extractComponents(from tokens: [String],
+                                           content: String) -> [KiCadComponent] {
+        var components = [KiCadComponent]()
+
+        // Use regex for reliable extraction of symbol blocks
+        // Pattern matches: (symbol (lib_id "...") ... (property "Reference" "R1") ... (property "Value" "10k") ...)
+        let refRe  = try? NSRegularExpression(
+            pattern: #"\(property\s+"Reference"\s+"([^"]+)""#)
+        let valRe  = try? NSRegularExpression(
+            pattern: #"\(property\s+"Value"\s+"([^"]+)""#)
+        let libRe  = try? NSRegularExpression(
+            pattern: #"\(lib_id\s+"([^"]+)""#)
+        let inBOMRe = try? NSRegularExpression(
+            pattern: #"\(in_bom\s+(yes|no)\)"#)
+        let atRe   = try? NSRegularExpression(
+            pattern: #"\(at\s+([-\d.]+)\s+([-\d.]+)"#)
+
+        // Split into symbol blocks (rough heuristic: find each (symbol block)
+        // A more robust approach mirrors KiCad's own sexpr_parser tool
+        var symbolBlocks = [String]()
+        var depth = 0
+        var blockStart: String.Index? = nil
+        var idx = content.startIndex
+        var inSymbol = false
+
+        while idx < content.endIndex {
+            let c = content[idx]
+            if c == "(" {
+                depth += 1
+                // Check if this opens a "symbol" block (not lib_sym or nested)
+                let ahead = content[idx...]
+                if depth == 2 && ahead.hasPrefix("(symbol") && blockStart == nil {
+                    blockStart  = idx
+                    inSymbol    = true
+                }
+            } else if c == ")" {
+                if inSymbol && depth == 2 {
+                    if let start = blockStart {
+                        symbolBlocks.append(String(content[start...idx]))
+                    }
+                    blockStart = nil; inSymbol = false
+                }
+                depth -= 1
+            }
+            idx = content.index(after: idx)
+        }
+
+        for block in symbolBlocks {
+            guard block.contains("(property \"Reference\"") else { continue }
+            let r = NSRange(block.startIndex..., in: block)
+
+            let ref  = firstCapture(refRe,  in: block, range: r) ?? ""
+            let val  = firstCapture(valRe,  in: block, range: r) ?? ""
+            let lib  = firstCapture(libRe,  in: block, range: r) ?? ""
+            let bom  = firstCapture(inBOMRe, in: block, range: r) ?? "yes"
+            let xStr = captureGroup(atRe, in: block, range: r, group: 1)
+            let yStr = captureGroup(atRe, in: block, range: r, group: 2)
+
+            guard !ref.isEmpty else { continue }
+            // Skip power symbols (they start with "#PWR" or "#FLG")
+            if ref.hasPrefix("#") { continue }
+
+            components.append(KiCadComponent(
+                ref:   ref,
+                value: val,
+                libId: lib,
+                x:     Double(xStr ?? "0") ?? 0,
+                y:     Double(yStr ?? "0") ?? 0,
+                inBOM: bom == "yes"
+            ))
+        }
+
+        return components
+    }
+
+    // MARK: - Net extraction
+    // Reads (wire ...) and (label ...) / (global_label ...) blocks
+    // Net connectivity is inferred from overlapping wire endpoints + labels
+
+    private static func extractNets(from tokens: [String],
+                                     content: String) -> ([KiCadNet], Set<String>) {
+        var namedNets = [KiCadNet]()
+        var powerNets = Set<String>()
+
+        // Extract net labels (these name the nets)
+        let labelRe = try? NSRegularExpression(
+            pattern: #"\((?:label|global_label|net_tie_pad_groups)\s+"([^"]+)""#)
+        let powerRe = try? NSRegularExpression(
+            pattern: #"\(symbol\s+\(lib_id\s+"power:([^"]+)"#)
+
+        let range = NSRange(content.startIndex..., in: content)
+        labelRe?.matches(in: content, range: range).forEach {
+            if let r = Range($0.range(at: 1), in: content) {
+                let name = String(content[r])
+                namedNets.append(KiCadNet(name: name, pinRefs: []))
+            }
+        }
+
+        // Extract power symbols as known nets
+        powerRe?.matches(in: content, range: range).forEach {
+            if let r = Range($0.range(at: 1), in: content) {
+                let pwr = String(content[r])
+                    .replacingOccurrences(of: "+", with: "+")
+                powerNets.insert(pwr)
+            }
+        }
+
+        // Always include standard power nets
+        ["GND", "0", "VCC", "VDD", "5V", "3V3", "3.3V", "VBUS"].forEach {
+            powerNets.insert($0)
+        }
+
+        return (namedNets, powerNets)
+    }
+
+    // MARK: - Helpers
+
+    private static func firstCapture(_ re: NSRegularExpression?,
+                                      in str: String,
+                                      range: NSRange) -> String? {
+        guard let m = re?.firstMatch(in: str, range: range),
+              let r = Range(m.range(at: 1), in: str) else { return nil }
+        return String(str[r])
+    }
+
+    private static func captureGroup(_ re: NSRegularExpression?,
+                                      in str: String,
+                                      range: NSRange,
+                                      group: Int) -> String? {
+        guard let m = re?.firstMatch(in: str, range: range),
+              let r = Range(m.range(at: group), in: str) else { return nil }
+        return String(str[r])
+    }
+
+    private static func deriveDiodeModel(value: String) -> String {
+        // Map common KiCad diode values to SPICE models
+        let models: [String: String] = [
+            "1N4148": "1N4148", "1N4007": "1N4007", "BAT43": "BAT43",
+            "BAT54": "BAT54", "LED": "LED", "D": "1N4148"
+        ]
+        return models[value] ?? sanitizeModelName(value.isEmpty ? "1N4148" : value)
+    }
+
+    private static func sanitizeModelName(_ name: String) -> String {
+        // SPICE model names must not contain special chars
+        name.replacingOccurrences(of: " ", with: "_")
+            .replacingOccurrences(of: "-", with: "_")
+            .replacingOccurrences(of: ":", with: "_")
+    }
+}
+
+// MARK: - Schematic diff (for FSEventWatcher)
+
+extension KiCadSExprParser {
+
+    struct SchemaDiff {
+        let addedComponents:   [(ref: String, value: String)]
+        let removedComponents: [(ref: String, value: String)]
+        let changedValues:     [(ref: String, old: String, new: String)]
+        let movedComponents:   [(ref: String, value: String, dx: Double, dy: Double)]
+        let netChanges:        (added: [String], removed: [String])
+
+        var isEmpty: Bool {
+            addedComponents.isEmpty && removedComponents.isEmpty &&
+            changedValues.isEmpty && movedComponents.isEmpty &&
+            netChanges.added.isEmpty && netChanges.removed.isEmpty
+        }
+
+        var summary: String {
+            var parts = [String]()
+            if !addedComponents.isEmpty {
+                let names = addedComponents.prefix(3).map { "\($0.ref) (\($0.value))" }
+                parts.append("Added: \(names.joined(separator: ", "))")
+            }
+            if !removedComponents.isEmpty {
+                let names = removedComponents.prefix(3).map { "\($0.ref) (\($0.value))" }
+                parts.append("Removed: \(names.joined(separator: ", "))")
+            }
+            if !changedValues.isEmpty {
+                let changes = changedValues.prefix(3).map { "\($0.ref): \($0.old)→\($0.new)" }
+                parts.append("Changed: \(changes.joined(separator: ", "))")
+            }
+            if !movedComponents.isEmpty {
+                let moves = movedComponents.prefix(3).map { "\($0.ref)" }
+                parts.append("Moved: \(moves.joined(separator: ", ")) (\(movedComponents.count) total)")
+            }
+            if !netChanges.added.isEmpty {
+                parts.append("New nets: \(netChanges.added.prefix(3).joined(separator: ", "))")
+            }
+            return parts.isEmpty ? "Layout/position change" : parts.joined(separator: " · ")
+        }
+
+        /// Full detail for the session summary screen
+        var detailLines: [String] {
+            var lines = [String]()
+            for c in addedComponents  { lines.append("+ \(c.ref) (\(c.value))") }
+            for c in removedComponents { lines.append("− \(c.ref) (\(c.value))") }
+            for c in changedValues    { lines.append("~ \(c.ref): \(c.old) → \(c.new)") }
+            for m in movedComponents  {
+                let dx = String(format: "%.1f", m.dx)
+                let dy = String(format: "%.1f", m.dy)
+                lines.append("↔ \(m.ref) (\(m.value)) moved Δ(\(dx), \(dy)) mil")
+            }
+            return lines
+        }
+    }
+
+    static func diff(old: KiCadSchematic, new: KiCadSchematic) -> SchemaDiff {
+        let oldMap = Dictionary(old.components.map { ($0.ref, $0) },
+                                uniquingKeysWith: { a, _ in a })
+        let newMap = Dictionary(new.components.map { ($0.ref, $0) },
+                                uniquingKeysWith: { a, _ in a })
+
+        let added   = newMap.filter { oldMap[$0.key] == nil }.map { ($0.key, $0.value.value) }
+        let removed = oldMap.filter { newMap[$0.key] == nil }.map { ($0.key, $0.value.value) }
+
+        let changed = newMap.compactMap { (ref, comp) -> (String, String, String)? in
+            guard let o = oldMap[ref], o.value != comp.value else { return nil }
+            return (ref, o.value, comp.value)
+        }
+
+        // Track position changes (components that exist in both but moved)
+        // Threshold of 1.0 mil to avoid floating-point noise
+        let moved: [(ref: String, value: String, dx: Double, dy: Double)] = newMap.compactMap { (ref, comp) in
+            guard let o = oldMap[ref] else { return nil }
+            let dx = comp.x - o.x
+            let dy = comp.y - o.y
+            guard abs(dx) > 1.0 || abs(dy) > 1.0 else { return nil }
+            return (ref, comp.value, dx, dy)
+        }
+
+        let oldNets = Set(old.nets.map(\.name))
+        let newNets = Set(new.nets.map(\.name))
+
+        return SchemaDiff(
+            addedComponents:   added,
+            removedComponents: removed,
+            changedValues:     changed,
+            movedComponents:   moved,
+            netChanges:        (added:   Array(newNets.subtracting(oldNets)),
+                                removed: Array(oldNets.subtracting(newNets)))
+        )
+    }
+}
